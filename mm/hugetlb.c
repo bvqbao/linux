@@ -1533,7 +1533,8 @@ static struct page *__hugetlb_alloc_buddy_huge_page(struct hstate *h,
 	gfp_mask |= __GFP_COMP|__GFP_RETRY_MAYFAIL|__GFP_NOWARN;
 	if (nid == NUMA_NO_NODE)
 		nid = numa_mem_id();
-	return __alloc_pages_nodemask(gfp_mask, order, nid, nmask);
+	return __alloc_pages_nodemask(gfp_mask, order, nid,
+					nmask, NUMA_NO_NODE);
 }
 
 static struct page *__alloc_buddy_huge_page(struct hstate *h, gfp_t gfp_mask,

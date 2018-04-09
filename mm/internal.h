@@ -121,6 +121,7 @@ struct alloc_context {
 	int migratetype;
 	enum zone_type high_zoneidx;
 	bool spread_dirty_pages;
+	int pv_preferred_nid;
 };
 
 #define ac_classzone_idx(ac) zonelist_zone_idx(ac->preferred_zoneref)

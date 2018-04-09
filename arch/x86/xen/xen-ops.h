@@ -74,6 +74,7 @@ void __init xen_init_time_ops(void);
 void __init xen_hvm_init_time_ops(void);
 
 irqreturn_t xen_debug_interrupt(int irq, void *dev_id);
+irqreturn_t xen_topology_interrupt(int irq, void *dev_id);
 
 bool xen_vcpu_stolen(int vcpu);
 

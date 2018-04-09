@@ -19,6 +19,7 @@
 #include <linux/page-flags-layout.h>
 #include <linux/atomic.h>
 #include <asm/page.h>
+#include <asm/xen/vnuma.h>
 
 /* Free memory management - zoned buddy allocator.  */
 #ifndef CONFIG_FORCE_MAX_ZONEORDER
@@ -281,6 +282,7 @@ struct per_cpu_pages {
 
 struct per_cpu_pageset {
 	struct per_cpu_pages pcp;
+	struct per_cpu_pages numa_pcp[XEN_NUMNODES];
 #ifdef CONFIG_NUMA
 	s8 expire;
 	u16 vm_numa_stat_diff[NR_VM_NUMA_STAT_ITEMS];
@@ -459,6 +461,7 @@ struct zone {
 
 	/* free areas of different sizes */
 	struct free_area	free_area[MAX_ORDER];
+	struct free_area	numa_free_area[XEN_NUMNODES][MAX_ORDER];
 
 	/* zone flags, see below */
 	unsigned long		flags;

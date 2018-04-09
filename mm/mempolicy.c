@@ -102,6 +102,10 @@
 #include <asm/tlbflush.h>
 #include <linux/uaccess.h>
 
+#include <asm/xen/page.h>
+#include <asm/xen/vnuma.h>
+#include <xen/xen.h>
+
 #include "internal.h"
 
 /* Internal flags */
@@ -122,6 +126,7 @@ static struct mempolicy default_policy = {
 	.refcnt = ATOMIC_INIT(1), /* never free it */
 	.mode = MPOL_PREFERRED,
 	.flags = MPOL_F_LOCAL,
+	.pv_preferred_node = NUMA_NO_NODE,
 };
 
 static struct mempolicy preferred_node_policy[MAX_NUMNODES];
@@ -203,6 +208,7 @@ static int mpol_set_nodemask(struct mempolicy *pol,
 		     const nodemask_t *nodes, struct nodemask_scratch *nsc)
 {
 	int ret;
+	nodemask_t uma;
 
 	/* if mode is MPOL_DEFAULT, pol is NULL. This is right. */
 	if (pol == NULL)
@@ -212,16 +218,20 @@ static int mpol_set_nodemask(struct mempolicy *pol,
 		  cpuset_current_mems_allowed, node_states[N_MEMORY]);
 
 	VM_BUG_ON(!nodes);
-	if (pol->mode == MPOL_PREFERRED && nodes_empty(*nodes))
+	if (pol->mode == MPOL_PREFERRED &&
+	     (nodes_empty(*nodes) || xen_pv_domu()))
 		nodes = NULL;	/* explicit local allocation */
 	else {
+		nodes_clear(uma);
+		node_set(0, uma);
+
 		if (pol->flags & MPOL_F_RELATIVE_NODES)
-			mpol_relative_nodemask(&nsc->mask2, nodes, &nsc->mask1);
+			mpol_relative_nodemask(&nsc->mask2, &uma, &nsc->mask1);
 		else
-			nodes_and(nsc->mask2, *nodes, nsc->mask1);
+			nodes_and(nsc->mask2, uma, nsc->mask1);
 
 		if (mpol_store_user_nodemask(pol))
-			pol->w.user_nodemask = *nodes;
+			pol->w.user_nodemask = uma;
 		else
 			pol->w.cpuset_mems_allowed =
 						cpuset_current_mems_allowed;
@@ -278,6 +288,21 @@ static struct mempolicy *mpol_new(unsigned short mode, unsigned short flags,
 	atomic_set(&policy->refcnt, 1);
 	policy->mode = mode;
 	policy->flags = flags;
+
+	policy->pv_nodes = *nodes;
+
+	if (nodes && !nodes_empty(*nodes)) {
+		if (mode == MPOL_PREFERRED)
+			policy->pv_preferred_node = first_node(*nodes);
+		else if (nodes_weight(*nodes) == xen_vnuma_num_nodes)
+			policy->pv_preferred_node = NUMA_NO_NODE;
+		else
+			policy->pv_preferred_node = node_random(nodes);
+	} else
+		policy->pv_preferred_node = NUMA_NO_NODE;
+
+	pr_debug("setting pv_preferred_node %d\n",
+				policy->pv_preferred_node);
 
 	return policy;
 }
@@ -784,8 +809,10 @@ static long do_set_mempolicy(unsigned short mode, unsigned short flags,
 	}
 	old = current->mempolicy;
 	current->mempolicy = new;
-	if (new && new->mode == MPOL_INTERLEAVE)
-		current->il_prev = MAX_NUMNODES-1;
+	if (new && new->mode == MPOL_INTERLEAVE) {
+		current->pv_il_prev = MAX_NUMNODES-1;
+		current->il_prev = 0;
+	}
 	task_unlock(current);
 	mpol_put(old);
 	ret = 0;
@@ -809,11 +836,11 @@ static void get_policy_nodemask(struct mempolicy *p, nodemask_t *nodes)
 	case MPOL_BIND:
 		/* Fall through */
 	case MPOL_INTERLEAVE:
-		*nodes = p->v.nodes;
+		*nodes = p->pv_nodes;
 		break;
 	case MPOL_PREFERRED:
-		if (!(p->flags & MPOL_F_LOCAL))
-			node_set(p->v.preferred_node, *nodes);
+		if (p->pv_preferred_node != NUMA_NO_NODE)
+			node_set(p->pv_preferred_node, *nodes);
 		/* else return empty node mask for local allocation */
 		break;
 	default:
@@ -828,7 +855,7 @@ static int lookup_node(unsigned long addr)
 
 	err = get_user_pages(addr & PAGE_MASK, 1, 0, &p, NULL);
 	if (err >= 0) {
-		err = page_to_nid(p);
+		err = xen_pnode_to_vnode(p->machine_nid);
 		put_page(p);
 	}
 	return err;
@@ -887,7 +914,7 @@ static long do_get_mempolicy(int *policy, nodemask_t *nmask,
 			*policy = err;
 		} else if (pol == current->mempolicy &&
 				pol->mode == MPOL_INTERLEAVE) {
-			*policy = next_node_in(current->il_prev, pol->v.nodes);
+			*policy = next_node_in(current->pv_il_prev, pol->pv_nodes);
 		} else {
 			err = -EINVAL;
 			goto out;
@@ -1341,6 +1368,70 @@ SYSCALL_DEFINE6(mbind, unsigned long, start, unsigned long, len,
 	return do_mbind(start, len, mode, mode_flags, &nodes, flags);
 }
 
+#define NUMA_VERSION		0
+#define NUMA_MAXNODE		1
+#define NUMA_NODEMASK_SZ	2
+#define NUMA_DISTANCE		3
+#define NUMA_CPU2NODE		4
+
+SYSCALL_DEFINE2(get_numa_info, int, numa_info, void __user *, buff)
+{
+	int v1, v2, p1, p2;
+	int *dist_table;
+	struct shared_info *sh = HYPERVISOR_shared_info;
+
+	switch(numa_info) {
+		case NUMA_VERSION:
+			*(unsigned long *)buff = atomic64_read(&topology_version);
+			break;
+		case NUMA_MAXNODE:
+			*(unsigned long *)buff = xen_vnuma_num_nodes - 1;
+			break;
+		case NUMA_NODEMASK_SZ:
+			*(int *)buff = MAX_NUMNODES;
+			break;
+		case NUMA_DISTANCE:
+			dist_table = (int *)buff;
+			for (v1 = 0; v1 < xen_vnuma_num_nodes; v1++) {
+				p1 = xen_vnode_to_pnode[v1];
+				for (v2 = 0; v2 < xen_vnuma_num_nodes; v2++) {
+					p2 = xen_vnode_to_pnode[v2];
+					dist_table[v1*XEN_NUMNODES+v2] =
+						xen_numa_distance[p1*XEN_NUMNODES+p2];
+					pr_debug("vdist(%d, %d) = pdist(%d, %d) = %d\n",
+							v1, v2, p1, p2, dist_table[
+								v1*XEN_NUMNODES+v2]);
+				}
+			}
+			break;
+		case NUMA_CPU2NODE:
+			*(int *)buff = xen_vnode_to_pnode[sh->vcpu_to_pnode[
+						smp_processor_id()]];
+			break;
+	}
+	return 0;
+}
+
+SYSCALL_DEFINE2(get_cpus_for_node, int, node, unsigned long __user *, cpumask)
+{
+	int i, err;
+	int ncpus = num_online_cpus();
+	struct shared_info *sh = HYPERVISOR_shared_info;
+	cpumask_t mask;
+	unsigned long cp_size = ALIGN(ncpus, BITS_PER_LONG) / 8;
+
+	cpumask_clear(&mask);
+
+	for (i = 0; i < ncpus; i++)
+		if (sh->vcpu_to_pnode[i] == xen_vnode_to_pnode[node])
+			cpumask_set_cpu(i, &mask);
+
+	err = copy_to_user(cpumask, &mask, cp_size) ? -EFAULT : 0;
+	pr_debug("node %d cpus %d cpumask %lx\n", node,
+				cpumask_weight(&mask), *cpumask);
+	return err;
+}
+
 /* Set the process memory policy */
 SYSCALL_DEFINE3(set_mempolicy, int, mode, const unsigned long __user *, nmask,
 		unsigned long, maxnode)
@@ -1694,6 +1785,17 @@ static unsigned interleave_nodes(struct mempolicy *policy)
 	return next;
 }
 
+static unsigned pv_interleave_nodes(struct mempolicy *policy)
+{
+	unsigned next;
+	struct task_struct *me = current;
+
+	next = next_node_in(me->pv_il_prev, policy->pv_nodes);
+	if (next < XEN_NUMNODES)
+		me->pv_il_prev = next;
+	return next;
+}
+
 /*
  * Depending on the memory policy provide a node from which to allocate the
  * next slab entry.
@@ -1761,6 +1863,22 @@ static unsigned offset_il_node(struct mempolicy *pol, unsigned long n)
 	return nid;
 }
 
+static unsigned pv_offset_il_node(struct mempolicy *pol, unsigned long n)
+{
+	unsigned nnodes = nodes_weight(pol->pv_nodes);
+	unsigned target;
+	int i;
+	int nid;
+
+	if (!nnodes)
+		return NUMA_NO_NODE;
+	target = (unsigned int)n % nnodes;
+	nid = first_node(pol->pv_nodes);
+	for (i = 0; i < target; i++)
+		nid = next_node(nid, pol->pv_nodes);
+	return nid;
+}
+
 /* Determine a node number for interleave */
 static inline unsigned interleave_nid(struct mempolicy *pol,
 		 struct vm_area_struct *vma, unsigned long addr, int shift)
@@ -1781,6 +1899,20 @@ static inline unsigned interleave_nid(struct mempolicy *pol,
 		return offset_il_node(pol, off);
 	} else
 		return interleave_nodes(pol);
+}
+
+static inline unsigned pv_interleave_nid(struct mempolicy *pol,
+		 struct vm_area_struct *vma, unsigned long addr, int shift)
+{
+	if (vma) {
+		unsigned long off;
+
+		BUG_ON(shift < PAGE_SHIFT);
+		off = vma->vm_pgoff >> (shift - PAGE_SHIFT);
+		off += (addr - vma->vm_start) >> shift;
+		return pv_offset_il_node(pol, off);
+	} else
+		return pv_interleave_nodes(pol);
 }
 
 #ifdef CONFIG_HUGETLBFS
@@ -1915,11 +2047,11 @@ out:
 /* Allocate a page in interleaved policy.
    Own path because it needs to do special accounting. */
 static struct page *alloc_page_interleave(gfp_t gfp, unsigned order,
-					unsigned nid)
+					unsigned nid, int pv_nid)
 {
 	struct page *page;
 
-	page = __alloc_pages(gfp, order, nid);
+	page = __alloc_pages_nodemask(gfp, order, nid, NULL, pv_nid);
 	if (page && page_to_nid(page) == nid) {
 		preempt_disable();
 		__inc_numa_state(page_zone(page), NUMA_INTERLEAVE_HIT);
@@ -1965,14 +2097,15 @@ alloc_pages_vma(gfp_t gfp, int order, struct vm_area_struct *vma,
 	if (pol->mode == MPOL_INTERLEAVE) {
 		unsigned nid;
 
-		nid = interleave_nid(pol, vma, addr, PAGE_SHIFT + order);
+		nid = pv_interleave_nid(pol, vma, addr, PAGE_SHIFT + order);
 		mpol_cond_put(pol);
-		page = alloc_page_interleave(gfp, order, nid);
+		page = alloc_page_interleave(gfp, order, 0 /* nid */, nid);
 		goto out;
 	}
 
 	if (unlikely(IS_ENABLED(CONFIG_TRANSPARENT_HUGEPAGE) && hugepage)) {
 		int hpage_node = node;
+		int pv_hpage_node = NUMA_NO_NODE;
 
 		/*
 		 * For hugepage allocation and non-interleave policy which
@@ -1984,22 +2117,25 @@ alloc_pages_vma(gfp_t gfp, int order, struct vm_area_struct *vma,
 		 * If the policy is interleave, or does not allow the current
 		 * node in its nodemask, we allocate the standard way.
 		 */
-		if (pol->mode == MPOL_PREFERRED &&
-						!(pol->flags & MPOL_F_LOCAL))
-			hpage_node = pol->v.preferred_node;
+		if (pol->mode == MPOL_PREFERRED) {
+			pv_hpage_node = pol->pv_preferred_node;
+			if (!(pol->flags & MPOL_F_LOCAL))
+				hpage_node = pol->v.preferred_node;
+		}
 
 		nmask = policy_nodemask(gfp, pol);
 		if (!nmask || node_isset(hpage_node, *nmask)) {
 			mpol_cond_put(pol);
-			page = __alloc_pages_node(hpage_node,
-						gfp | __GFP_THISNODE, order);
+			page = __alloc_pages_nodemask(gfp | __GFP_THISNODE, order,
+					hpage_node, NULL, pv_hpage_node);
 			goto out;
 		}
 	}
 
 	nmask = policy_nodemask(gfp, pol);
 	preferred_nid = policy_node(gfp, pol, node);
-	page = __alloc_pages_nodemask(gfp, order, preferred_nid, nmask);
+	page = __alloc_pages_nodemask(gfp, order, preferred_nid,
+			nmask, pol->pv_preferred_node);
 	mpol_cond_put(pol);
 out:
 	return page;
@@ -2033,11 +2169,14 @@ struct page *alloc_pages_current(gfp_t gfp, unsigned order)
 	 * nor system default_policy
 	 */
 	if (pol->mode == MPOL_INTERLEAVE)
-		page = alloc_page_interleave(gfp, order, interleave_nodes(pol));
+		page = alloc_page_interleave(gfp, order,
+				0 /* interleave_nodes(pol) */,
+				pv_interleave_nodes(pol));
 	else
 		page = __alloc_pages_nodemask(gfp, order,
 				policy_node(gfp, pol, numa_node_id()),
-				policy_nodemask(gfp, pol));
+				policy_nodemask(gfp, pol),
+				pol->pv_preferred_node);
 
 	return page;
 }
@@ -2105,9 +2244,11 @@ bool __mpol_equal(struct mempolicy *a, struct mempolicy *b)
 	case MPOL_BIND:
 		/* Fall through */
 	case MPOL_INTERLEAVE:
-		return !!nodes_equal(a->v.nodes, b->v.nodes);
+		return !! (nodes_equal(a->v.nodes, b->v.nodes) &&
+			nodes_equal(a->pv_nodes, b->pv_nodes));
 	case MPOL_PREFERRED:
-		return a->v.preferred_node == b->v.preferred_node;
+		return (a->v.preferred_node == b->v.preferred_node &&
+			a->pv_preferred_node == b->pv_preferred_node);
 	default:
 		BUG();
 		return false;
@@ -2568,6 +2709,7 @@ void __init numa_policy_init(void)
 			.refcnt = ATOMIC_INIT(1),
 			.mode = MPOL_PREFERRED,
 			.flags = MPOL_F_MOF | MPOL_F_MORON,
+			.pv_preferred_node = NUMA_NO_NODE,
 			.v = { .preferred_node = nid, },
 		};
 	}

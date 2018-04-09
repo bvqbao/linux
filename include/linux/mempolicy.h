@@ -44,10 +44,12 @@ struct mm_struct;
  */
 struct mempolicy {
 	atomic_t refcnt;
-	unsigned short mode; 	/* See MPOL_* above */
+	unsigned short mode;	/* See MPOL_* above */
 	unsigned short flags;	/* See set_mempolicy() MPOL_F_* above */
+	short pv_preferred_node; /* preferred/bind */
+	nodemask_t pv_nodes;     /* interleave */
 	union {
-		short 		 preferred_node; /* preferred */
+		short		 preferred_node; /* preferred */
 		nodemask_t	 nodes;		/* interleave/bind */
 		/* undefined for default */
 	} v;

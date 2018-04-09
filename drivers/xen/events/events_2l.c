@@ -14,6 +14,7 @@
 #include <asm/sync_bitops.h>
 #include <asm/xen/hypercall.h>
 #include <asm/xen/hypervisor.h>
+#include <asm/xen/vnuma.h>
 
 #include <xen/xen.h>
 #include <xen/xen-ops.h>
@@ -343,6 +344,14 @@ irqreturn_t xen_debug_interrupt(int irq, void *dev_id)
 
 	spin_unlock_irqrestore(&debug_lock, flags);
 
+	return IRQ_HANDLED;
+}
+
+irqreturn_t xen_topology_interrupt(int irq, void *dev_id)
+{
+	atomic64_inc(&topology_version);
+
+	xen_update_vcpu_to_pnode();
 	return IRQ_HANDLED;
 }
 

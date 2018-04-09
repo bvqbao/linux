@@ -52,7 +52,7 @@ static inline struct page *new_page_nodemask(struct page *page,
 		gfp_mask |= __GFP_HIGHMEM;
 
 	new_page = __alloc_pages_nodemask(gfp_mask, order,
-				preferred_nid, nodemask);
+			preferred_nid, nodemask, NUMA_NO_NODE);
 
 	if (new_page && PageTransHuge(page))
 		prep_transhuge_page(new_page);

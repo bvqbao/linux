@@ -782,6 +782,10 @@ asmlinkage long sys_get_mempolicy(int __user *policy,
 				unsigned long maxnode,
 				unsigned long addr, unsigned long flags);
 
+asmlinkage long sys_get_numa_info(int numa_info, void __user *buff);
+asmlinkage long sys_get_cpus_for_node(int node,
+				unsigned long __user *cpumask);
+
 asmlinkage long sys_inotify_init(void);
 asmlinkage long sys_inotify_init1(int flags);
 asmlinkage long sys_inotify_add_watch(int fd, const char __user *path,

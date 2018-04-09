@@ -22,6 +22,8 @@ extern bool xen_pvh;
 
 #define xen_domain()		(xen_domain_type != XEN_NATIVE)
 #define xen_pv_domain()		(xen_domain_type == XEN_PV_DOMAIN)
+#define xen_pv_domu()		(xen_pv_domain() && \
+					!(xen_start_info->flags & SIF_INITDOMAIN))
 #define xen_hvm_domain()	(xen_domain_type == XEN_HVM_DOMAIN)
 #define xen_pvh_domain()	(xen_pvh)
 

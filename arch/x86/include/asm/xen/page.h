@@ -12,6 +12,7 @@
 #include <linux/uaccess.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
+#include <asm/xen/vnuma.h>
 
 #include <xen/interface/xen.h>
 #include <xen/interface/grant_table.h>
@@ -228,6 +229,25 @@ static inline unsigned long gfn_to_pfn(unsigned long gfn)
 	else
 		return mfn_to_pfn(gfn);
 }
+
+static inline int xen_pfn_to_nid(unsigned long gfn)
+{
+	unsigned long mfn;
+	int mr_id, pnode;
+
+	mfn = xen_p2m_addr[gfn];
+
+	for (pnode = 0; pnode < xen_numa_num_nodes; pnode++) {
+		mr_id = pnode * 2;
+		if ((mfn - xen_numa_memranges[mr_id]) <
+				xen_numa_memranges[mr_id+1])
+			return pnode;
+	}
+
+	return NUMA_NO_NODE;
+}
+
+#define xen_page_to_nid(page)	xen_pfn_to_nid(page_to_pfn(page))
 
 /* Pseudo-physical <-> Bus conversion */
 #define pfn_to_bfn(pfn)		pfn_to_gfn(pfn)

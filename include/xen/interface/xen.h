@@ -115,6 +115,7 @@
 #define VIRQ_XC_RESERVED 11 /* G. Reserved for XenClient                     */
 #define VIRQ_ENOMEM     12 /* G. (DOM0) Low on heap memory       */
 #define VIRQ_XENPMU     13  /* PMC interrupt                                 */
+#define VIRQ_TOPOLOGY   14  /* V. Topology has been changed.                 */
 
 /* Architecture-specific VIRQ definitions. */
 #define VIRQ_ARCH_0    16
@@ -600,6 +601,7 @@ struct shared_info {
 
 	struct arch_shared_info arch;
 
+	uint8_t vcpu_to_pnode[MAX_VIRT_CPUS];
 };
 
 /*

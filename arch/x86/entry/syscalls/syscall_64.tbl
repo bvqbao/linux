@@ -341,6 +341,12 @@
 332	common	statx			sys_statx
 
 #
+# vNUMA system call numbers.
+#
+333	common	get_numa_info		sys_get_numa_info
+334	common	get_cpus_for_node	sys_get_cpus_for_node
+
+#
 # x32-specific system call numbers start at 512 to avoid cache impact
 # for native 64-bit operation.
 #

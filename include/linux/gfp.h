@@ -462,12 +462,13 @@ static inline void arch_alloc_page(struct page *page, int order) { }
 
 struct page *
 __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
-							nodemask_t *nodemask);
+				nodemask_t *nodemask, int pv_preferred_nid);
 
 static inline struct page *
 __alloc_pages(gfp_t gfp_mask, unsigned int order, int preferred_nid)
 {
-	return __alloc_pages_nodemask(gfp_mask, order, preferred_nid, NULL);
+	return __alloc_pages_nodemask(gfp_mask, order,
+			preferred_nid, NULL, NUMA_NO_NODE);
 }
 
 /*
