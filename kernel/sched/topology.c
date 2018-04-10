@@ -1235,7 +1235,9 @@ const struct cpumask *bao_cpu_coregroup_mask(int cpu){
 
 const struct cpumask *bao_cpu_cpu_mask(int cpu){
 
-        return bao_node_to_cpumask_map[cpu];
+	 struct shared_info *sh;
+	 sh = HYPERVISOR_shared_info;
+        return bao_node_to_cpumask_map[sh->vcpu_to_pnode[cpu]];
 }
 
 
@@ -1373,19 +1375,24 @@ static void init_numa_topology_type(void)
 
 void  sched_init_bao(void)
 {
-unsigned int  node, cpu;
-struct shared_info *sh; 
-sh = HYPERVISOR_shared_info;
-for (node = 0; node < nr_node_ids; node++){
+	unsigned int  node, cpu;
+	struct shared_info *sh; 
+	sh = HYPERVISOR_shared_info;
+	for (node = 0; node < nr_node_ids; node++){
                 /* Allocating the CPU mask for the dynamic NUMA */
-                alloc_bootmem_cpumask_var(&bao_node_to_cpumask_map[node]);
+		printk("%s %s:%d >>>>>>>>>>>>>>>>>>>>> node %d \n",__FILE__,__func__,__LINE__,node);
+		bao_node_to_cpumask_map[node] = (cpumask_var_t) kmalloc(sizeof(cpumask_var_t), GFP_KERNEL); 
+		cpumask_clear(bao_node_to_cpumask_map[node]);
         }
         for_each_cpu(cpu,cpu_active_mask){
-                        alloc_bootmem_cpumask_var(&bao_cpu_smt_to_cpumask_map[cpu]);
-                        alloc_bootmem_cpumask_var(&bao_cpu_llc_sharedmap_to_cpumask_map[cpu]);
+			bao_cpu_smt_to_cpumask_map[cpu] = (cpumask_var_t) kmalloc(sizeof(cpumask_var_t), GFP_KERNEL);
+        		bao_cpu_llc_sharedmap_to_cpumask_map[cpu] = (cpumask_var_t) kmalloc(sizeof(cpumask_var_t), GFP_KERNEL);                
+			cpumask_clear(bao_cpu_smt_to_cpumask_map[cpu]);
+			 cpumask_clear(bao_cpu_llc_sharedmap_to_cpumask_map[cpu]);
                         cpumask_set_cpu(cpu, bao_cpu_smt_to_cpumask_map[cpu]);
                         cpumask_set_cpu(cpu,bao_cpu_llc_sharedmap_to_cpumask_map[cpu]);		
                 	cpumask_set_cpu(cpu,bao_node_to_cpumask_map[sh->vcpu_to_pnode[cpu]]);
+			printk("%s %s:%d >>>>>>>>>>>>>>>>>>>>> node %d cpu %d \n",__FILE__,__func__,__LINE__,sh->vcpu_to_pnode[cpu],cpu);
         }
 }
 
@@ -1729,6 +1736,7 @@ build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *att
 	/* Build the groups for the domains */
 	for_each_cpu(i, cpu_map) {
 		for (sd = *per_cpu_ptr(d.sd, i); sd; sd = sd->parent) {
+			printk(">>>>>>>>>>> \n");
 			sd->span_weight = cpumask_weight(sched_domain_span(sd));
 			if (sd->flags & SD_OVERLAP) {
 				if (build_overlap_sched_groups(sd, i))

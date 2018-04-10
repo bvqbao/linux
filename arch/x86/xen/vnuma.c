@@ -24,7 +24,7 @@ void xen_update_vcpu_to_pnode(void)
 	int pnode, found_pnode;
 	int dist, min_dist;
 	struct shared_info *sh;
-
+	printk("%s %s:%d >>>>>>>>>>> \n",__FILE__,__func__,__LINE__);
 	sh = HYPERVISOR_shared_info;
 
 	cpu = smp_processor_id();

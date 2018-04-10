@@ -790,8 +790,12 @@ void numa_remove_cpu(int cpu)
 
 #else	/* !CONFIG_DEBUG_PER_CPU_MAPS */
 
+/* bao: modifying the cpu_to_node function */ 
+
 int __cpu_to_node(int cpu)
 {
+//	struct shared_info *sh = HYPERVISOR_shared_info;	
+//	return sh->vcpu_to_pnode[cpu]
 	if (early_per_cpu_ptr(x86_cpu_to_node_map)) {
 		printk(KERN_WARNING
 			"cpu_to_node(%d): usage too early!\n", cpu);
