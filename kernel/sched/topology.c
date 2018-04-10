@@ -1712,10 +1712,11 @@ build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *att
 	/* Set up domains for CPUs specified by the cpu_map: */
 	for_each_cpu(i, cpu_map) {
 		struct sched_domain_topology_level *tl;
-
+		 printk("%s %s:%d >>>>>>>>>>>>>>>> cpu Id %d  nodeid %d \n", __FILE__,__func__,__LINE__,i, cpu_to_node(i));
 		sd = NULL;
 		for_each_sd_topology(tl) {
 			sd = build_sched_domain(tl, cpu_map, attr, sd, i);
+			printk("%s %s:%d  >>>>>>>>>>>>>>>> cpumask %*pb[l] \n",__FILE__,__func__,__LINE__, cpumask_pr_args(sched_domain_span(sd)));
 			if (tl == sched_domain_topology)
 				*per_cpu_ptr(d.sd, i) = sd;
 			if (tl->flags & SDTL_OVERLAP)
