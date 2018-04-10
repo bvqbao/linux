@@ -6320,6 +6320,7 @@ void __init setup_nr_node_ids(void)
 
 	highest = find_last_bit(node_possible_map.bits, MAX_NUMNODES);
 	nr_node_ids = highest + 1;
+	nr_node_ids =  xen_vnuma_num_nodes;
 }
 #endif
 

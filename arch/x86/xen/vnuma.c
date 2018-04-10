@@ -1,3 +1,5 @@
+
+#include <linux/sched.h>
 #include <linux/err.h>
 #include <linux/memblock.h>
 #include <xen/interface/xen.h>
@@ -43,6 +45,8 @@ void xen_update_vcpu_to_pnode(void)
 		}
 		sh->vcpu_to_pnode[cpu] = found_pnode;
 	}
+         /* bao: function called to change the topology of a VM */ 
+	bao_numa_topology_change();
 }
 
 /*

@@ -957,6 +957,9 @@ extern bool find_numa_distance(int distance);
 #endif
 
 #ifdef CONFIG_NUMA
+/* Bao: Initialization function for dynamic CPU mask */ 
+
+extern void sched_init_bao(void);
 extern void sched_init_numa(void);
 extern void sched_domains_numa_masks_set(unsigned int cpu);
 extern void sched_domains_numa_masks_clear(unsigned int cpu);

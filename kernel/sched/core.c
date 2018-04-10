@@ -5729,7 +5729,8 @@ void __init sched_init_smp(void)
 	cpumask_var_t non_isolated_cpus;
 
 	alloc_cpumask_var(&non_isolated_cpus, GFP_KERNEL);
-
+	/* Bao  Calling the initialization function for cpu mask for dynamic NUMA */ 
+	sched_init_bao();
 	sched_init_numa();
 
 	/*

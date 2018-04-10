@@ -4,6 +4,9 @@
  */
 #include <linux/sched.h>
 #include <linux/mutex.h>
+#include <xen/interface/xen.h>
+#include <asm/xen/vnuma.h>
+
 
 #include "sched.h"
 
@@ -1198,17 +1201,60 @@ sd_init(struct sched_domain_topology_level *tl,
 	return sd;
 }
 
+
+
+/*  
+* Bao: initializing the cpumask for the actual topology of the VM. 
+*/
+
+#define MAX_NUMCPU 256
+cpumask_var_t bao_node_to_cpumask_map[MAX_NUMNODES];
+EXPORT_SYMBOL(bao_node_to_cpumask_map);
+
+cpumask_var_t bao_cpu_smt_to_cpumask_map[MAX_NUMCPU];
+EXPORT_SYMBOL(bao_cpu_smt_to_cpumask_map);
+
+cpumask_var_t bao_cpu_llc_sharedmap_to_cpumask_map[MAX_NUMCPU];
+EXPORT_SYMBOL(bao_cpu_llc_sharedmap_to_cpumask_map);
+
+
+
+
+const struct cpumask * bao_cpu_smt_mask(int cpu){
+
+        return bao_cpu_smt_to_cpumask_map[cpu];
+
+}
+
+
+const struct cpumask *bao_cpu_coregroup_mask(int cpu){
+
+        return bao_cpu_llc_sharedmap_to_cpumask_map[cpu];
+}
+
+
+const struct cpumask *bao_cpu_cpu_mask(int cpu){
+
+        return bao_node_to_cpumask_map[cpu];
+}
+
+
 /*
  * Topology list, bottom-up.
  */
+
+
+/*
+* Modification to define new fonction that give the new topology. 
+*/ 
 static struct sched_domain_topology_level default_topology[] = {
 #ifdef CONFIG_SCHED_SMT
-	{ cpu_smt_mask, cpu_smt_flags, SD_INIT_NAME(SMT) },
+	{ bao_cpu_smt_mask, cpu_smt_flags, SD_INIT_NAME(SMT) },
 #endif
 #ifdef CONFIG_SCHED_MC
-	{ cpu_coregroup_mask, cpu_core_flags, SD_INIT_NAME(MC) },
+	{ bao_cpu_coregroup_mask, cpu_core_flags, SD_INIT_NAME(MC) },
 #endif
-	{ cpu_cpu_mask, SD_INIT_NAME(DIE) },
+	{ bao_cpu_cpu_mask, SD_INIT_NAME(DIE) },
 	{ NULL, },
 };
 
@@ -1320,6 +1366,29 @@ static void init_numa_topology_type(void)
 		}
 	}
 }
+
+/* 
+* bao: Initializing the CPU mask for dynamic NUMA. 
+*/
+
+void  sched_init_bao(void)
+{
+unsigned int  node, cpu;
+struct shared_info *sh; 
+sh = HYPERVISOR_shared_info;
+for (node = 0; node < nr_node_ids; node++){
+                /* Allocating the CPU mask for the dynamic NUMA */
+                alloc_bootmem_cpumask_var(&bao_node_to_cpumask_map[node]);
+        }
+        for_each_cpu(cpu,cpu_active_mask){
+                        alloc_bootmem_cpumask_var(&bao_cpu_smt_to_cpumask_map[cpu]);
+                        alloc_bootmem_cpumask_var(&bao_cpu_llc_sharedmap_to_cpumask_map[cpu]);
+                        cpumask_set_cpu(cpu, bao_cpu_smt_to_cpumask_map[cpu]);
+                        cpumask_set_cpu(cpu,bao_cpu_llc_sharedmap_to_cpumask_map[cpu]);		
+                	cpumask_set_cpu(cpu,bao_node_to_cpumask_map[sh->vcpu_to_pnode[cpu]]);
+        }
+}
+
 
 void sched_init_numa(void)
 {
@@ -1591,6 +1660,7 @@ static void __sdt_free(const struct cpumask *cpu_map)
 		sdd->sgc = NULL;
 	}
 }
+
 
 static struct sched_domain *build_sched_domain(struct sched_domain_topology_level *tl,
 		const struct cpumask *cpu_map, struct sched_domain_attr *attr,
@@ -1909,4 +1979,35 @@ match2:
 
 	mutex_unlock(&sched_domains_mutex);
 }
+
+
+
+/* bao: building scheduling domain */
+void bao_numa_topology_change(void)
+{
+	int i;
+	unsigned int node, cpu;
+	struct shared_info *sh;
+	sh = HYPERVISOR_shared_info;
+	for(node=0;node<nr_node_ids;node++){
+		cpumask_clear(bao_node_to_cpumask_map[node]);
+		 for_each_cpu(cpu,cpu_active_mask){
+			if(sh->vcpu_to_pnode[cpu]==node) {
+				cpumask_set_cpu(cpu,bao_node_to_cpumask_map[node]);
+			}			
+
+ 	       	}
+	}
+	
+        unregister_sched_domain_sysctl();
+        printk("%s %s: %d >>>>>>>>>>>>>< \n",__FILE__,__func__,__LINE__);
+        for (i = 1; i < ndoms_cur; i++) {
+                detach_destroy_domains(doms_cur[i]);
+        }
+        build_sched_domains(doms_cur[0], NULL);
+        register_sched_domain_sysctl();
+
+}
+
+
 

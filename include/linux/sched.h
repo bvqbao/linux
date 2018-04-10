@@ -1508,12 +1508,15 @@ extern char *get_task_comm(char *to, struct task_struct *tsk);
 #ifdef CONFIG_SMP
 void scheduler_ipi(void);
 extern unsigned long wait_task_inactive(struct task_struct *, long match_state);
+/* Bao: function called when numa topology changed.*/ 
+extern void bao_numa_topology_change(void);
 #else
 static inline void scheduler_ipi(void) { }
 static inline unsigned long wait_task_inactive(struct task_struct *p, long match_state)
 {
 	return 1;
 }
+
 #endif
 
 /*
