@@ -19,8 +19,7 @@ atomic64_t topology_version;
 void xen_update_vcpu_to_pnode(void)
 {
 	int i, cpu;
-	int pnode, found_pnode;
-	int dist, min_dist;
+	int pnode, this_pnode;
 	struct shared_info *sh;
 
 	sh = HYPERVISOR_shared_info;
@@ -28,20 +27,19 @@ void xen_update_vcpu_to_pnode(void)
 	cpu = smp_processor_id();
 	pnode = sh->vcpu_to_pnode[cpu];
 
-	min_dist = INT_MAX;
-	found_pnode = pnode;
-	if (pnode < xen_numa_num_nodes && !xen_memnode_map[pnode]) {
-		/* Find the closest mem node */
-		for (i = 0; i < xen_numa_num_nodes; i++) {
-			if (xen_memnode_map[i]) {
-				dist = xen_numa_distance[pnode*XEN_NUMNODES+i];
-				if (min_dist > dist) {
-					min_dist = dist;
-					found_pnode = i;
-				}
+	if (!xen_memnode_map[pnode]) {
+		/*
+		 * The system doesn't have memory residing in the new node.
+		 * We try to find the closest memory node.
+		 */
+		i = xen_numa_num_nodes - 2;
+		do {
+			this_pnode = nodelists[pnode][i];
+			if (xen_memnode_map[this_pnode]) {
+				sh->vcpu_to_pnode[cpu] = this_pnode;
+				break;
 			}
-		}
-		sh->vcpu_to_pnode[cpu] = found_pnode;
+		} while (i--);
 	}
 }
 
